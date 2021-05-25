@@ -160,7 +160,7 @@ def guess_channels(file_input):
     return audio['channels'] if 'channels' in audio else None
 
 
-def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, dry_run=False, force_encode=False, sample_rate=None, channels=None, frame_rate=None, ffmpeg_path=None, threads=0, remove_options={}):
+def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, dry_run=False, force_encode=False, sample_rate=None, channels=None, frame_rate=None, ffmpeg_path=None, threads=0, options={}):
 
     # Make the path absolute, resolving any symlinks
     file_input = Path(file_input).resolve()
@@ -203,29 +203,39 @@ def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, d
         if channels: command.extend(['-ac', str(channels)])
 
         # video parameters
+        # Explanations : https://sites.google.com/site/linuxencoding/x264-ffmpeg-mapping
         command.extend([
             '-c:v', 'libx264',
-            '-sws_flags', 'lanczos',
+            '-sws_flags', 'bicubic',
             '-pix_fmt', 'yuv420p',
             '-threads', threads,
             '-movflags', '+faststart',
-            '-b-pyramid', 'none',
-            '-b_strategy', '2',
+            # '-b-pyramid', 'none',
+            # '-b_strategy', '2',
             '-r', frame_rate,
-            '-g', '300',
-            '-keyint_min', '1',
+            '-g', '250',
+            '-keyint_min', '25',
             '-preset', 'veryfast',
-            '-refs', '4',
-            '-me_method', 'hex',
-            '-me_range', '32',
+            # '-refs', '6',
+            # '-me_method', 'hex',
+            # '-me_range', '32',
             '-qcomp', '0.6',
-            '-qmin', '3',
-            '-subq', '4',
+            # '-qmin', '3',
+            # '-subq', '4',
             '-crf', crf,
+            '-trellis', '2',
             *scale_params(size)
         ])
-        for option in remove_options:
-            del command[option]
+        for option, value in options.items():
+            if option in command:
+                i = command.index(option)
+                if value is None:
+                    del command[i]
+                    del command[i]
+                else :
+                    command[i+1] = value
+            else:
+                command.extend([option, value])
         
         command.extend([ '-y', encode_output ])
 

@@ -171,7 +171,7 @@ if __name__ == '__main__':
                     encoding_details = encode_and_vmaf(extract_path, crf=crf, mode="simple")
 
                     all_details = {**scene_details, **extract_details, **encoding_details}
-                    line_csv = ";".join(all_details.values) + "\n"
+                    line_csv = ";".join(all_details.values()) + "\n"
                     file_csv.write(line_csv)
 
 #                 ####
