@@ -89,7 +89,7 @@ def get_ffprobe_sar(file_input):
     Du coup, ce code cherche d'abord une valeur entre `[]` et se rabat sur l'autre sinon.
     """
     command = [
-        'ffprobe',
+        str(BIN_FFPROBE),
         file_input
     ]
     proc = Popen(command, stdout=PIPE, stderr=PIPE)
