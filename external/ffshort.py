@@ -14,6 +14,9 @@ from pathlib import Path
 import shutil
 
 
+SCRIPT_DIR = Path(sys.path[0])
+BIN_FFMPEG = SCRIPT_DIR / "externals" / "ffmpeg"
+BIN_FFPROBE = SCRIPT_DIR / "externals" / "ffprobe"
 
 # source : https://stackoverflow.com/a/14981125
 def eprint(*args, **kwargs):
@@ -44,7 +47,7 @@ def scale_params(size):
 
 def get_streams_data(file_input):
     command = [
-        'ffprobe',
+        str(BIN_FFPROBE),
         file_input,
         '-show_streams',
         '-print_format', 'json',
@@ -167,7 +170,7 @@ def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, d
 
     print(f"Traitement de {file_input}...")
 
-
+    ffmpeg_path = ffmpeg_path if ffmpeg_path else BIN_FFMPEG
     size = size if size else guess_resolution(file_input)
     frame_rate = frame_rate if frame_rate else guess_frame_rate(file_input)
     sample_rate = sample_rate if sample_rate else guess_sample_rate(file_input)
