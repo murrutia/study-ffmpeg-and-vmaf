@@ -17,7 +17,7 @@ SCRIPT_DIR = Path(sys.path[0])
 EXTRACTS_DIR = SCRIPT_DIR / 'tmp' / 'extracts'
 EXTRACTS_DIR.mkdir(parents=True, exist_ok=True)
 BIN_FFMPEG = SCRIPT_DIR / "external" / "ffmpeg"
-BIN_FFPROBE = SCRIPT_DIR / "externals" / "ffprobe"
+BIN_FFPROBE = SCRIPT_DIR / "external" / "ffprobe"
 MODEL_PATH = SCRIPT_DIR / "external" / "vmaf_v0.6.1.json"
 OUTPUT_DIR = SCRIPT_DIR / "output"
 # CRF_VALUES = [25, 27, 30]

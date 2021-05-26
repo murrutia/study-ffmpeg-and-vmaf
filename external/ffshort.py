@@ -15,8 +15,8 @@ import shutil
 
 
 SCRIPT_DIR = Path(sys.path[0])
-BIN_FFMPEG = SCRIPT_DIR / "externals" / "ffmpeg"
-BIN_FFPROBE = SCRIPT_DIR / "externals" / "ffprobe"
+BIN_FFMPEG = SCRIPT_DIR / "external" / "ffmpeg"
+BIN_FFPROBE = SCRIPT_DIR / "external" / "ffprobe"
 
 # source : https://stackoverflow.com/a/14981125
 def eprint(*args, **kwargs):
