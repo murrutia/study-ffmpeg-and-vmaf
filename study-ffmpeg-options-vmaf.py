@@ -17,6 +17,7 @@ SCRIPT_DIR = Path(sys.path[0])
 EXTRACTS_DIR = SCRIPT_DIR / 'tmp' / 'extracts'
 EXTRACTS_DIR.mkdir(parents=True, exist_ok=True)
 BIN_FFMPEG = SCRIPT_DIR / "external" / "ffmpeg"
+BIN_FFPROBE = SCRIPT_DIR / "externals" / "ffprobe"
 MODEL_PATH = SCRIPT_DIR / "external" / "vmaf_v0.6.1.json"
 OUTPUT_DIR = SCRIPT_DIR / "output"
 # CRF_VALUES = [25, 27, 30]
@@ -43,7 +44,7 @@ FFMPEG_OPTIONS = [
 ]
 
 def get_video_duration(file_path):
-    cmd = f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {file_path}"
+    cmd = f"{BIN_FFPROBE} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {file_path}"
     return float(subprocess.check_output(cmd.split(" ")))
 
 

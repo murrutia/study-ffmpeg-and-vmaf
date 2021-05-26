@@ -3,6 +3,7 @@
 __pycache__
 
 external/ffmpeg
+external/ffprobe
 .vscode
 
 output/*
