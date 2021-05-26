@@ -80,7 +80,7 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
     vmaf_path = OUTPUT_DIR / f"{extract_name}.crf{crf}.mode-{mode}.option{option_name}.json"
     if not vmaf_path.exists():
         vmaf_cmd = f"{BIN_FFMPEG} -loglevel quiet -stats -i {str(input_path)} -i {str(output_path)} "
-        vmaf_cmd += f"-lavfi [0:v]setpts=PTS-STARTPTS[ref];[1:v]setpts=PTS-STARTPTS[dist];[dist][ref]libvmaf=log_fmt=json:log_path={str(vmaf_path)}:model_path=/Users/murrutia/src/vendor/vmaf/model/vmaf_v0.6.1.json "
+        vmaf_cmd += f"-lavfi [0:v]setpts=PTS-STARTPTS[ref];[1:v]setpts=PTS-STARTPTS[dist];[dist][ref]libvmaf=log_fmt=json:log_path={str(vmaf_path)}:model_path={str(MODEL_PATH)} "
         vmaf_cmd += "-threads 0 -f null -"
         start_cmd = time()
         subprocess.run(vmaf_cmd.split(" "))
