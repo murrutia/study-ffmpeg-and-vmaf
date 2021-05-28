@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
+import os
 import re
 import sys
 import json
 import argparse
-from os import rename
 import subprocess
 from subprocess import run, PIPE, Popen
 from collections import deque
@@ -14,9 +14,12 @@ from pathlib import Path
 import shutil
 
 
-SCRIPT_DIR = Path(sys.path[0])
-BIN_FFMPEG = SCRIPT_DIR / "external" / "ffmpeg"
-BIN_FFPROBE = SCRIPT_DIR / "external" / "ffprobe"
+SCRIPT_DIR = Path(os.path.dirname(__file__))
+BIN_FFMPEG = SCRIPT_DIR / "ffmpeg"
+BIN_FFPROBE = SCRIPT_DIR / "ffprobe"
+
+def colored_cli_text(text, r, g, b):
+    return 
 
 # source : https://stackoverflow.com/a/14981125
 def eprint(*args, **kwargs):
@@ -48,7 +51,7 @@ def scale_params(size):
 def get_streams_data(file_input):
     command = [
         str(BIN_FFPROBE),
-        file_input,
+        str(file_input),
         '-show_streams',
         '-print_format', 'json',
         '-hide_banner'
@@ -90,7 +93,7 @@ def get_ffprobe_sar(file_input):
     """
     command = [
         str(BIN_FFPROBE),
-        file_input
+        str(file_input)
     ]
     proc = Popen(command, stdout=PIPE, stderr=PIPE)
     stdout, stderr = proc.communicate()
@@ -147,15 +150,13 @@ def guess_resolution(file_input):
 
 def guess_frame_rate(file_input):
     video = get_stream_data(file_input, 'video')
-    num, den = video['r_frame_rate'].split('/')
-    frame_rate = int(num) / int(den)
+    frame_rate = video['avg_frame_rate'] if 'avg_frame_rate' in video else video['r_frame_rate']
     return frame_rate
 
 
 def guess_sample_rate(file_input):
     audio = get_stream_data(file_input, 'audio')
     return audio['sample_rate'] if 'sample_rate' in audio else None
-
 
 
 def guess_channels(file_input):
@@ -175,7 +176,13 @@ def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, d
     frame_rate = frame_rate if frame_rate else guess_frame_rate(file_input)
     sample_rate = sample_rate if sample_rate else guess_sample_rate(file_input)
     channels = channels if channels else guess_channels(file_input)
-    print(f"size : {size}, sample_rate : {sample_rate}, channels : {channels}")
+
+    frame_rate_str = frame_rate
+    if type(frame_rate) == str and frame_rate.find('/') != -1:
+        num, den = frame_rate.split('/')
+        frame_rate_str = f"{int(num) / int(den)} ({num} / {den})"
+
+    print(f"Video infos : size : {size}, frame_rate : {frame_rate_str}, sample_rate : {sample_rate}, channels : {channels}", file=sys.stderr)
 
     suffix = f".{size}.mp4"
 
@@ -195,7 +202,7 @@ def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, d
 
     if force_encode or not encode_output.exists():
         command = [
-            ffmpeg_path, '-hide_banner',
+            str(ffmpeg_path), '-hide_banner',
             '-loglevel', 'quiet', '-stats',
             '-i', file_input
         ]
@@ -211,11 +218,11 @@ def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, d
             '-c:v', 'libx264',
             '-sws_flags', 'bicubic',
             '-pix_fmt', 'yuv420p',
-            '-threads', threads,
+            '-threads', str(threads),
             '-movflags', '+faststart',
             # '-b-pyramid', 'none',
             # '-b_strategy', '2',
-            '-r', frame_rate,
+            '-r', str(frame_rate),
             '-g', '250',
             '-keyint_min', '25',
             '-preset', 'veryfast',
@@ -225,7 +232,7 @@ def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, d
             '-qcomp', '0.6',
             # '-qmin', '3',
             # '-subq', '4',
-            '-crf', crf,
+            '-crf', str(crf),
             '-trellis', '2',
             *scale_params(size)
         ])
@@ -243,10 +250,10 @@ def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, d
         command.extend([ '-y', encode_output ])
 
         cmd_str = ' '.join([str(c) for c in command])
-        print(cmd_str)
+        print(cmd_str, file=sys.stderr)
         
         if dry_run:
-            return cmd_str
+            return command
     
         run(command)
 

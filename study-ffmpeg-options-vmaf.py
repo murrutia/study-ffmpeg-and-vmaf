@@ -1,5 +1,6 @@
 #!/usr/local/bin/python3
 
+import os
 import re
 import sys
 import json
@@ -10,9 +11,9 @@ from time import time
 from datetime import timedelta
 
 from scenecut_extractor.__main__ import get_scenecuts
-from external.ffshort import ffshort
+from external.ffshort import ffshort, guess_frame_rate
 
-SCRIPT_DIR = Path(sys.path[0])
+SCRIPT_DIR = Path(os.path.dirname(__file__))
 
 EXTRACTS_DIR = SCRIPT_DIR / 'tmp' / 'extracts'
 EXTRACTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -20,9 +21,10 @@ BIN_FFMPEG = SCRIPT_DIR / "external" / "ffmpeg"
 BIN_FFPROBE = SCRIPT_DIR / "external" / "ffprobe"
 MODEL_PATH = SCRIPT_DIR / "external" / "vmaf_v0.6.1.json"
 OUTPUT_DIR = SCRIPT_DIR / "output"
+TMP_JSON = SCRIPT_DIR
 # CRF_VALUES = [25, 27, 30]
-CRF_VALUES = [27, 30]
-EXTRACT_DURATIONS = [15, 45, 100]
+CRF_VALUES = [27]
+EXTRACT_DURATIONS = [120]
 # EXTRACT_DURATIONS = [10, 15, 30, 45, 60]
 FFMPEG_OPTIONS = [
     # '-c:v',
@@ -43,17 +45,12 @@ FFMPEG_OPTIONS = [
     # '-trellis'
 ]
 
-def get_video_duration(file_path):
-    cmd = f"{BIN_FFPROBE} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {file_path}"
-    return float(subprocess.check_output(cmd.split(" ")))
 
-
-def get_line_count(file_path):
-    x = 0
-    with open(file_path) as fd:
-        for line in fd:
-            x += 1
-    return x
+def get_video_duration(filepath):
+    cmd = f"{BIN_FFPROBE} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1"
+    cmd_a = cmd.split(" ")
+    cmd_a.append(str(filepath))
+    return float(subprocess.check_output(cmd_a))
 
 
 def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
@@ -68,23 +65,23 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
         encode_cmd = ffshort(str(input_path), str(output_path), crf=crf, dry_run=True, force_encode=True, ffmpeg_path=BIN_FFMPEG, options=options)
     else:
         output_path = EXTRACTS_DIR / f"{extract_name}.crf{crf}.mode-simple.mp4"
-        encode_cmd = f"{BIN_FFMPEG} -hide_banner -loglevel quiet -stats -i {str(input_path)} -crf {crf} -y {str(output_path)}"
+        encode_cmd = f"{BIN_FFMPEG} -hide_banner -loglevel quiet -stats -i {str(input_path)} -crf {crf}".split(" ")
+        encode_cmd.extend(['-y', str(output_path)])
                 
     start_cmd = time()
-    subprocess.run(encode_cmd.split(" "))
+    subprocess.run(encode_cmd)
     encoding_duration = str(timedelta(seconds=(time() - start_cmd)))
     encoded_filesize = output_path.stat().st_size
     size_percentage = encoded_filesize / extract_filesize * 100
-    print()
 
     vmaf_path = OUTPUT_DIR / f"{extract_name}.crf{crf}.mode-{mode}.option{option_name}.json"
+    frame_rate = guess_frame_rate(input_path)
     if not vmaf_path.exists():
-        vmaf_cmd = f"{BIN_FFMPEG} -loglevel quiet -stats -i {str(input_path)} -i {str(output_path)} "
+        vmaf_cmd = f"{BIN_FFMPEG} -loglevel quiet -stats -r {frame_rate} -i {str(input_path)} -r {frame_rate} -i {str(output_path)} "
         vmaf_cmd += f"-lavfi [0:v]setpts=PTS-STARTPTS[ref];[1:v]setpts=PTS-STARTPTS[dist];[dist][ref]libvmaf=log_fmt=json:log_path={str(vmaf_path)}:model_path={str(MODEL_PATH)} "
         vmaf_cmd += "-threads 0 -f null -"
         start_cmd = time()
         subprocess.run(vmaf_cmd.split(" "))
-        print()
         vmaf_duration = str(timedelta(seconds=(time() - start_cmd)))
     else:
         vmaf_duration = "N/A"
@@ -109,13 +106,14 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('input')
+    parser.add_argument('output_suffix', nargs='?', help="Un suffixe ajouté au nom du fichier de sortie csv")
     cli_args = parser.parse_args()
 
     # On récupère la durée et le nom de la vidéo
     # video_name = re.search(r'_(v.*)\..*$', cli_args.input).group(1) 
     duration = get_video_duration(cli_args.input)
-    video_name = Path(cli_args.input).name
-    video_name = re.sub(r'\.[^.]+$', '', video_name)
+    video_name = Path(cli_args.input).stem
+    video_extension = Path(cli_args.input).suffix
 
     ################################################################################################
     # Ici on va tester différentes combinaisons pour déterminer s'il y a une manière plus pertinente
@@ -146,7 +144,7 @@ if __name__ == '__main__':
 
     # Préparation du csv qui va accueillir les résultats
     results_csv = "Scene score; Time; Duration; Start; End; CRF value; Option removed; Encoding time; VMAF score; VMAF computation time; Filesize; Compression %; Encoding command\n"
-    results_csv_path = OUTPUT_DIR / f"{video_name}_ffmpeg-options-vmaf-scores.csv"
+    results_csv_path = OUTPUT_DIR / f"{video_name}_ffmpeg-options-vmaf-scores{'.'+ cli_args.output_suffix if cli_args.output_suffix else ''}.csv"
 
     file_csv = open(str(results_csv_path), 'w+')
     file_csv.write(results_csv)
@@ -167,20 +165,26 @@ if __name__ == '__main__':
         for extract_duration in EXTRACT_DURATIONS:
 
             print(f"Extract for score {scene_score} at time {scene_time} of duration {extract_duration}s...")
-            start_time = scene_time - extract_duration / 2 if scene_time > extract_duration / 2 else 0
-            end_time = start_time + extract_duration if start_time + extract_duration < duration else duration
+            start_time = scene_time - extract_duration / 2
+            if start_time < 0:
+                start_time = 0
+            if start_time + extract_duration > duration:
+                start_time = duration - extract_duration
+            # start_time = scene_time - extract_duration / 2 if scene_time > extract_duration / 2 else 0
+            # end_time = start_time + extract_duration if start_time + extract_duration < duration else duration
 
             extract_details = {
-                "Duration": end_time - start_time,
+                "Duration": extract_duration,
                 "Start time": start_time,
-                "End time": end_time,
+                "End time": start_time + extract_duration,
             }
             
             video_basename = re.sub(r'\.[^.]+$', '', video_name)
             extract_name = f"{video_name}-extract.duration-{extract_duration}s.timestamp-{scene_time}s.score-{score['score']}"
-            extract_path = EXTRACTS_DIR / (extract_name + ".mov")
-            extract_cmd = f"{BIN_FFMPEG} -hide_banner -i {cli_args.input} -ss {start_time} -t {extract_duration} -c copy -y {str(extract_path)}"
-            subprocess.run(extract_cmd.split(" "))
+            extract_path = EXTRACTS_DIR / (extract_name + video_extension)
+            extract_cmd = f"{BIN_FFMPEG} -hide_banner -loglevel quiet -stats -i {cli_args.input} -ss {start_time} -t {extract_duration} -c copy".split(' ')
+            extract_cmd.extend(['-y', str(extract_path)])
+            subprocess.run(extract_cmd)
 
             extract_filesize = extract_path.stat().st_size
 
