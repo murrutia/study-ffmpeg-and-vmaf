@@ -150,7 +150,8 @@ def guess_resolution(file_input):
 
 def guess_frame_rate(file_input):
     video = get_stream_data(file_input, 'video')
-    frame_rate = video['avg_frame_rate'] if 'avg_frame_rate' in video else video['r_frame_rate']
+    # frame_rate = video['avg_frame_rate'] if 'avg_frame_rate' in video else video['r_frame_rate']
+    frame_rate = video['r_frame_rate']
     return frame_rate
 
 

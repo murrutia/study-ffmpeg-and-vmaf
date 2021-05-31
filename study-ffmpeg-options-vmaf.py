@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/bin/env python3
 
 import os
 import re
@@ -9,9 +9,10 @@ import subprocess
 from pathlib import Path
 from time import time
 from datetime import timedelta
-
+from statistics import mean , harmonic_mean
 from scenecut_extractor.__main__ import get_scenecuts
 from external.ffshort import ffshort, guess_frame_rate
+from external.easyVmaf.Vmaf import vmaf
 
 SCRIPT_DIR = Path(os.path.dirname(__file__))
 
@@ -69,32 +70,42 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
         encode_cmd.extend(['-y', str(output_path)])
                 
     start_cmd = time()
+    print(encode_cmd)
     subprocess.run(encode_cmd)
     encoding_duration = str(timedelta(seconds=(time() - start_cmd)))
     encoded_filesize = output_path.stat().st_size
     size_percentage = encoded_filesize / extract_filesize * 100
 
     vmaf_path = OUTPUT_DIR / f"{extract_name}.crf{crf}.mode-{mode}.option{option_name}.json"
+    
     frame_rate = guess_frame_rate(input_path)
     if not vmaf_path.exists():
-        vmaf_cmd = f"{BIN_FFMPEG} -loglevel quiet -stats -r {frame_rate} -i {str(input_path)} -r {frame_rate} -i {str(output_path)} "
-        vmaf_cmd += f"-lavfi [0:v]setpts=PTS-STARTPTS[ref];[1:v]setpts=PTS-STARTPTS[dist];[dist][ref]libvmaf=log_fmt=json:log_path={str(vmaf_path)}:model_path={str(MODEL_PATH)} "
-        vmaf_cmd += "-threads 0 -f null -"
+        # vmaf_cmd = f"{BIN_FFMPEG} -loglevel quiet -stats -r {frame_rate} -i {str(input_path)} -r {frame_rate} -i {str(output_path)} "
+        # vmaf_cmd += f"-lavfi [0:v]setpts=PTS-STARTPTS[ref];[1:v]setpts=PTS-STARTPTS[dist];[dist][ref]libvmaf=log_fmt=json:log_path={str(vmaf_path)}:model_path={str(MODEL_PATH)} "
+        # vmaf_cmd += "-threads 0 -f null -"
+        # start_cmd = time()
+        # subprocess.run(vmaf_cmd.split(" "))
+        # vmaf_duration = str(timedelta(seconds=(time() - start_cmd)))
+
         start_cmd = time()
-        subprocess.run(vmaf_cmd.split(" "))
+        myVmaf = vmaf(output_path, input_path, output_fmt='json', log_path=vmaf_path)
+        myVmaf.getVmaf()
         vmaf_duration = str(timedelta(seconds=(time() - start_cmd)))
     else:
         vmaf_duration = "N/A"
 
+    vmafScore = []
     with open(str(vmaf_path), 'r') as fd:
-        vmaf_json = json.loads(fd.read())
-    vmaf_score = vmaf_json['pooled_metrics']['vmaf']['harmonic_mean']
+        jsonData = json.load(fd)
+        for frame in jsonData['frames']:
+            vmafScore.append(frame["metrics"]["vmaf"])
 
     values = {
         "CRF value": crf,
         "Option removed": "' "+ str(remove_option),
         "Encoding duration": encoding_duration,
-        "VMAF harmonic mean score": vmaf_score,
+        "VMAF harmonic mean score": mean(vmafScore),
+        "VMAF harmonic mean score": harmonic_mean(vmafScore),
         "VMAF computing duration": vmaf_duration,
         "Encoded filesize": encoded_filesize,
         "Filesize percentage": size_percentage,
@@ -143,7 +154,7 @@ if __name__ == '__main__':
     scenescores_extract = [scenescores[1], scenescores[int(sl/2)], scenescores[-2]]
 
     # Préparation du csv qui va accueillir les résultats
-    results_csv = "Scene score; Time; Duration; Start; End; CRF value; Option removed; Encoding time; VMAF score; VMAF computation time; Filesize; Compression %; Encoding command\n"
+    results_csv = "Scene score; Time; Duration; Start; End; CRF value; Option removed; Encoding time; VMAF arithmetic mean; VMAF harmonic mean; VMAF computation time; Filesize; Compression %; Encoding command\n"
     results_csv_path = OUTPUT_DIR / f"{video_name}_ffmpeg-options-vmaf-scores{'.'+ cli_args.output_suffix if cli_args.output_suffix else ''}.csv"
 
     file_csv = open(str(results_csv_path), 'w+')

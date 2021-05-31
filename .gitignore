@@ -11,3 +11,5 @@ output/*
 
 tmp/*
 !tmp/.gitkeep
+
+.env

@@ -1,0 +1,3 @@
+[submodule "external/easyVmaf"]
+	path = external/easyVmaf
+	url = https://github.com/murrutia/easyVmaf
