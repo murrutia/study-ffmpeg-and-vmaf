@@ -226,7 +226,7 @@ def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, d
             '-r', str(frame_rate),
             '-g', '250',
             '-keyint_min', '25',
-            '-preset', 'veryfast',
+            '-preset', 'medium',
             # '-refs', '6',
             # '-me_method', 'hex',
             # '-me_range', '32',
@@ -245,7 +245,7 @@ def ffshort(file_input, file_output=None, crf=27, size=None, temp_folder=None, d
                     del command[i]
                 else :
                     command[i+1] = value
-            else:
+            elif value is not None:
                 command.extend([option, value])
         
         command.extend([ '-y', encode_output ])

@@ -4,28 +4,35 @@ import os
 import re
 import sys
 import json
+import logging
 import argparse
 import subprocess
-from pathlib import Path
 from time import time
+from glob import glob
+from pathlib import Path
 from datetime import timedelta
+from dotenv import find_dotenv, dotenv_values
 from statistics import mean , harmonic_mean
 from scenecut_extractor.__main__ import get_scenecuts
 from external.ffshort import ffshort, guess_frame_rate
 from external.easyVmaf.Vmaf import vmaf
 
+
+config = dotenv_values(find_dotenv())
+
 SCRIPT_DIR = Path(os.path.dirname(__file__))
 
-EXTRACTS_DIR = SCRIPT_DIR / 'tmp' / 'extracts'
-EXTRACTS_DIR.mkdir(parents=True, exist_ok=True)
-BIN_FFMPEG = SCRIPT_DIR / "external" / "ffmpeg"
-BIN_FFPROBE = SCRIPT_DIR / "external" / "ffprobe"
-MODEL_PATH = SCRIPT_DIR / "external" / "vmaf_v0.6.1.json"
 OUTPUT_DIR = SCRIPT_DIR / "output"
-TMP_JSON = SCRIPT_DIR
+EXTRACTS_DIR = SCRIPT_DIR / 'tmp' / 'extracts'
+VMAF_DIR = SCRIPT_DIR / 'tmp' / 'vmaf'
+
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+EXTRACTS_DIR.mkdir(parents=True, exist_ok=True)
+VMAF_DIR.mkdir(parents=True, exist_ok=True)
+
 # CRF_VALUES = [25, 27, 30]
 CRF_VALUES = [27]
-EXTRACT_DURATIONS = [120]
+EXTRACT_DURATIONS = [60]
 # EXTRACT_DURATIONS = [10, 15, 30, 45, 60]
 FFMPEG_OPTIONS = [
     # '-c:v',
@@ -34,21 +41,21 @@ FFMPEG_OPTIONS = [
     # '-movflags',
     # '-b-pyramid',
     # '-b_strategy',
-    # '-g',
+    '-g',
     # '-keyint_min',
-    '-preset',
+    # '-preset',
     # '-refs',
     # '-me_method',
     # '-me_range',
     # '-qcomp',
     # '-qmin',
     # '-subq',
-    # '-trellis'
+    '-trellis'
 ]
 
 
 def get_video_duration(filepath):
-    cmd = f"{BIN_FFPROBE} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1"
+    cmd = f"{config['ffprobe']} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1"
     cmd_a = cmd.split(" ")
     cmd_a.append(str(filepath))
     return float(subprocess.check_output(cmd_a))
@@ -63,10 +70,10 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
 
     if mode == 'ffshort':
         output_path = EXTRACTS_DIR / f"{extract_name}.crf{crf}.mode-ffshort.option{option_name}.mp4"
-        encode_cmd = ffshort(str(input_path), str(output_path), crf=crf, dry_run=True, force_encode=True, ffmpeg_path=BIN_FFMPEG, options=options)
+        encode_cmd = ffshort(str(input_path), str(output_path), crf=crf, dry_run=True, force_encode=True, ffmpeg_path=config['ffmpeg'], options=options)
     else:
         output_path = EXTRACTS_DIR / f"{extract_name}.crf{crf}.mode-simple.mp4"
-        encode_cmd = f"{BIN_FFMPEG} -hide_banner -loglevel quiet -stats -i {str(input_path)} -crf {crf}".split(" ")
+        encode_cmd = f"{config['ffmpeg']} -hide_banner -loglevel quiet -stats -i {str(input_path)} -crf {crf}".split(" ")
         encode_cmd.extend(['-y', str(output_path)])
                 
     start_cmd = time()
@@ -80,19 +87,17 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
     
     frame_rate = guess_frame_rate(input_path)
     if not vmaf_path.exists():
-        # vmaf_cmd = f"{BIN_FFMPEG} -loglevel quiet -stats -r {frame_rate} -i {str(input_path)} -r {frame_rate} -i {str(output_path)} "
-        # vmaf_cmd += f"-lavfi [0:v]setpts=PTS-STARTPTS[ref];[1:v]setpts=PTS-STARTPTS[dist];[dist][ref]libvmaf=log_fmt=json:log_path={str(vmaf_path)}:model_path={str(MODEL_PATH)} "
-        # vmaf_cmd += "-threads 0 -f null -"
-        # start_cmd = time()
-        # subprocess.run(vmaf_cmd.split(" "))
-        # vmaf_duration = str(timedelta(seconds=(time() - start_cmd)))
-
         start_cmd = time()
         myVmaf = vmaf(output_path, input_path, output_fmt='json', log_path=vmaf_path)
-        offset, psnr = myVmaf.syncOffset()  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
+        offset1, psnr1 = myVmaf.syncOffset(syncWindow=2)  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
+        offset2, psnr2 = myVmaf.syncOffset(reverse=True)
+        offset, psnr = [offset1, psnr1] if offset1 <= psnr1 else [offset2, psnr2]
+        myVmaf.offset = offset
         myVmaf.getVmaf()
         vmaf_duration = str(timedelta(seconds=(time() - start_cmd)))
     else:
+        offset = "N/A"
+        psnr = "N/A"
         vmaf_duration = "N/A"
 
     vmafScore = []
@@ -117,17 +122,30 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
     return values
 
 
-if __name__ == '__main__':
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('input')
     parser.add_argument('output_suffix', nargs='?', help="Un suffixe ajouté au nom du fichier de sortie csv")
+    parser.add_argument('--log-level', default="warning", help="Level of logging : debug, info, warning (default), error or critical")
+
     cli_args = parser.parse_args()
+    return cli_args
+
+
+if __name__ == '__main__':
+    
+    cli_args = parse_args()
+
+    # Initializations
+    logging.basicConfig(level = getattr(logging,  cli_args.log_level.upper(), 'WARNING'))
+    input = Path(cli_args.input)
+
 
     # On récupère la durée et le nom de la vidéo
     # video_name = re.search(r'_(v.*)\..*$', cli_args.input).group(1) 
-    duration = get_video_duration(cli_args.input)
-    video_name = Path(cli_args.input).stem
-    video_extension = Path(cli_args.input).suffix
+    duration = get_video_duration(input)
+    video_name = input.stem
+    video_extension = input.suffix
 
     ################################################################################################
     # Ici on va tester différentes combinaisons pour déterminer s'il y a une manière plus pertinente
@@ -197,13 +215,13 @@ if __name__ == '__main__':
             video_basename = re.sub(r'\.[^.]+$', '', video_name)
             extract_name = f"{video_name}-extract.duration-{extract_duration}s.timestamp-{scene_time}s.score-{score['score']}"
             extract_path = EXTRACTS_DIR / (extract_name + video_extension)
-            extract_cmd = f"{BIN_FFMPEG} -hide_banner -loglevel quiet -stats -i {cli_args.input} -ss {start_time} -t {extract_duration} -c copy".split(' ')
+            extract_cmd = f"{config['ffmpeg']} -hide_banner -loglevel quiet -stats -i {cli_args.input} -ss {start_time} -t {extract_duration} -c copy".split(' ')
             extract_cmd.extend(['-y', str(extract_path)])
             subprocess.run(extract_cmd)
 
             extract_filesize = extract_path.stat().st_size
 
-            # out = ffshort(extract_path, dry_run=True, ffmpeg_path=BIN_FFMPEG)
+            # out = ffshort(extract_path, dry_run=True, ffmpeg_path=config['ffmpeg'])
             
             # Encodage et test de qualité pour chacune des valeurs de CRF à tester
             for crf in CRF_VALUES:
@@ -234,8 +252,9 @@ if __name__ == '__main__':
                     file_csv.write(line_csv)
 
     
-    # with open(str(results_csv_path), 'w+') as fd:
-    #     fd.write(results_csv)
+    for file in glob(f"{OUTPUT_DIR}/*.json"):
+        os.remove(file)
+
     file_csv.close()
     print(f"Les résultats ont été enregistrés dans le fichier {str(results_csv_path)}.")
 
