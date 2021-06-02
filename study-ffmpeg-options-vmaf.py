@@ -89,6 +89,7 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
 
         start_cmd = time()
         myVmaf = vmaf(output_path, input_path, output_fmt='json', log_path=vmaf_path)
+        offset, psnr = myVmaf.syncOffset()  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
         myVmaf.getVmaf()
         vmaf_duration = str(timedelta(seconds=(time() - start_cmd)))
     else:
@@ -104,7 +105,9 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
         "CRF value": crf,
         "Option removed": "' "+ str(remove_option),
         "Encoding duration": encoding_duration,
-        "VMAF harmonic mean score": mean(vmafScore),
+        "VMAF offset": offset,
+        "VMAF PSNR": psnr,
+        "VMAF arithmetic mean score": mean(vmafScore),
         "VMAF harmonic mean score": harmonic_mean(vmafScore),
         "VMAF computing duration": vmaf_duration,
         "Encoded filesize": encoded_filesize,
@@ -151,10 +154,11 @@ if __name__ == '__main__':
 
     # Réduction des résultats au 2eme meilleur, le moyen et le 2eme pire
     sl = len(scenescores)
-    scenescores_extract = [scenescores[1], scenescores[int(sl/2)], scenescores[-2]]
+    # scenescores_extract = [scenescores[1], scenescores[int(sl/2)], scenescores[-2]]
+    scenescores_extract = [scenescores[1]]
 
     # Préparation du csv qui va accueillir les résultats
-    results_csv = "Scene score; Time; Duration; Start; End; CRF value; Option removed; Encoding time; VMAF arithmetic mean; VMAF harmonic mean; VMAF computation time; Filesize; Compression %; Encoding command\n"
+    results_csv = "Scene score; Time; Duration; Start; End; CRF value; Option removed; Encoding time; VMAF offset; VMAF PSNR;VMAF arithmetic mean; VMAF harmonic mean; VMAF computation time; Filesize; Compression %; Encoding command\n"
     results_csv_path = OUTPUT_DIR / f"{video_name}_ffmpeg-options-vmaf-scores{'.'+ cli_args.output_suffix if cli_args.output_suffix else ''}.csv"
 
     file_csv = open(str(results_csv_path), 'w+')

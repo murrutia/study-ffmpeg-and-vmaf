@@ -13,3 +13,4 @@ tmp/*
 !tmp/.gitkeep
 
 .env
+stats_file_psnr.log
