@@ -91,7 +91,7 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
         myVmaf = vmaf(output_path, input_path, output_fmt='json', log_path=vmaf_path)
         offset1, psnr1 = myVmaf.syncOffset(syncWindow=2)  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
         offset2, psnr2 = myVmaf.syncOffset(reverse=True)
-        offset, psnr = [offset1, psnr1] if offset1 <= psnr1 else [offset2, psnr2]
+        offset, psnr = [offset1, psnr1] if offset1 >= psnr1 else [offset2, psnr2]
         myVmaf.offset = offset
         myVmaf.getVmaf()
         vmaf_duration = str(timedelta(seconds=(time() - start_cmd)))
