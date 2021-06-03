@@ -14,6 +14,7 @@ from datetime import timedelta
 from dotenv import find_dotenv, dotenv_values
 from statistics import mean , harmonic_mean
 from scenecut_extractor.__main__ import get_scenecuts
+from utils.ffmpeg_scenescores import get_sorted_scenescores
 from external.ffshort import ffshort, guess_frame_rate
 from external.easyVmaf.Vmaf import vmaf
 
@@ -32,7 +33,7 @@ VMAF_DIR.mkdir(parents=True, exist_ok=True)
 
 # CRF_VALUES = [25, 27, 30]
 CRF_VALUES = [27]
-EXTRACT_DURATIONS = [60]
+EXTRACT_DURATIONS = [30]
 # EXTRACT_DURATIONS = [10, 15, 30, 45, 60]
 FFMPEG_OPTIONS = [
     # '-c:v',
@@ -41,7 +42,7 @@ FFMPEG_OPTIONS = [
     # '-movflags',
     # '-b-pyramid',
     # '-b_strategy',
-    '-g',
+    # '-g',
     # '-keyint_min',
     # '-preset',
     # '-refs',
@@ -50,7 +51,7 @@ FFMPEG_OPTIONS = [
     # '-qcomp',
     # '-qmin',
     # '-subq',
-    '-trellis'
+    # '-trellis'
 ]
 
 
@@ -61,7 +62,30 @@ def get_video_duration(filepath):
     return float(subprocess.check_output(cmd_a))
 
 
-def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
+def compute_vmaf(reference, encoded, log_path):
+    if not log_path.exists():
+        myVmaf = vmaf(encoded, reference, output_fmt='json', log_path=log_path, loglevel='quiet')
+        # offset1, psnr1 = myVmaf.syncOffset()  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
+        # offset2, psnr2 = myVmaf.syncOffset(reverse=True)
+        offset, psnr = myVmaf.syncOffset()  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
+
+        # offset, psnr = [offset1, psnr1] if psnr1 >= psnr2 else [-offset2, psnr2]
+        myVmaf.offset = offset
+        myVmaf.getVmaf()
+    else:
+        offset = "N/A"
+        psnr = "N/A"
+
+    vmaf_scores = []
+    with open(str(log_path), 'r') as fd:
+        jsonData = json.load(fd)
+        for frame in jsonData['frames']:
+            vmaf_scores.append(frame["metrics"]["vmaf"])
+    
+    return [offset, psnr, vmaf_scores]
+
+
+def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None, keep_temp_files=False):
     extract_name = Path(input_path).name
     extract_name = re.sub(r'\.[^.]+$', '', extract_name)
     option_name = remove_option.replace(':', '') if remove_option else 'None'
@@ -77,7 +101,7 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
         encode_cmd.extend(['-y', str(output_path)])
                 
     start_cmd = time()
-    print(encode_cmd)
+    # print(encode_cmd)
     subprocess.run(encode_cmd)
     encoding_duration = str(timedelta(seconds=(time() - start_cmd)))
     encoded_filesize = output_path.stat().st_size
@@ -85,26 +109,14 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
 
     vmaf_path = OUTPUT_DIR / f"{extract_name}.crf{crf}.mode-{mode}.option{option_name}.json"
     
-    frame_rate = guess_frame_rate(input_path)
-    if not vmaf_path.exists():
-        start_cmd = time()
-        myVmaf = vmaf(output_path, input_path, output_fmt='json', log_path=vmaf_path)
-        offset1, psnr1 = myVmaf.syncOffset(syncWindow=2)  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
-        offset2, psnr2 = myVmaf.syncOffset(reverse=True)
-        offset, psnr = [offset1, psnr1] if offset1 >= psnr1 else [offset2, psnr2]
-        myVmaf.offset = offset
-        myVmaf.getVmaf()
-        vmaf_duration = str(timedelta(seconds=(time() - start_cmd)))
-    else:
-        offset = "N/A"
-        psnr = "N/A"
-        vmaf_duration = "N/A"
+    start_cmd = time()
+    offset, psnr, vmaf_scores = compute_vmaf(output_path, input_path, vmaf_path)
+    vmaf_duration = str(timedelta(seconds=(time() - start_cmd)))
+    
+    if not keep_temp_files:
+        os.remove(output_path)
+        os.remove(vmaf_path)
 
-    vmafScore = []
-    with open(str(vmaf_path), 'r') as fd:
-        jsonData = json.load(fd)
-        for frame in jsonData['frames']:
-            vmafScore.append(frame["metrics"]["vmaf"])
 
     values = {
         "CRF value": crf,
@@ -112,8 +124,8 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
         "Encoding duration": encoding_duration,
         "VMAF offset": offset,
         "VMAF PSNR": psnr,
-        "VMAF arithmetic mean score": mean(vmafScore),
-        "VMAF harmonic mean score": harmonic_mean(vmafScore),
+        "VMAF arithmetic mean score": mean(vmaf_scores),
+        "VMAF harmonic mean score": harmonic_mean(vmaf_scores),
         "VMAF computing duration": vmaf_duration,
         "Encoded filesize": encoded_filesize,
         "Filesize percentage": size_percentage,
@@ -125,11 +137,20 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('input')
-    parser.add_argument('output_suffix', nargs='?', help="Un suffixe ajouté au nom du fichier de sortie csv")
-    parser.add_argument('--log-level', default="warning", help="Level of logging : debug, info, warning (default), error or critical")
+    parser.add_argument('--log-level', default='warning', help="Level of logging : debug, info, warning (default), error or critical")
+    parser.add_argument('--ffmpeg-log-level', default='quiet')
+    parser.add_argument('--keep-temp-files', '-k', action='store_true', help="Keep temporary files")
+    parser.add_argument('--output-csv', help="CSV file where the results will be stored")
 
     cli_args = parser.parse_args()
     return cli_args
+
+
+def ffmpeg_extract(input, output, start, duration, log_level='quiet'):
+
+    extract_cmd = f"{config['ffmpeg']} -hide_banner -loglevel {log_level} -stats -i {input} -ss {start} -t {duration} -c copy".split(' ')
+    extract_cmd.extend(['-y', output])
+    subprocess.run(extract_cmd)
 
 
 if __name__ == '__main__':
@@ -147,37 +168,25 @@ if __name__ == '__main__':
     video_name = input.stem
     video_extension = input.suffix
 
-    ################################################################################################
-    # Ici on va tester différentes combinaisons pour déterminer s'il y a une manière plus pertinente
-    # qu'une autre pour juger de la qualité d'une vidéo encodée par rapport à l'originale.
-    # 1 - est-ce que la durée de l'extrait a un impact ?
-    # 2 - est-ce que choisir un extrait proche d'un changement de scène ou non a un impact ?
-    
+    '''
+    Ici on va tester différentes combinaisons pour déterminer s'il y a une manière plus pertinente
+    qu'une autre pour juger de la qualité d'une vidéo encodée par rapport à l'originale.
+    1 - est-ce que la durée de l'extrait a un impact ?
+    2 - est-ce que choisir un extrait proche d'un changement de scène ou non a un impact ?
+    '''
     ##
     # Calcul des "scores" de changement dans les frames pour détecter les changements de scene
-    scenescores_filepath = OUTPUT_DIR / f"{video_name}-scenescore.json"
-
-    if scenescores_filepath.exists():
-        with open(str(scenescores_filepath), 'r') as fd:
-            scenescores = json.loads(fd.read())
-    else:
-        # run scene change detection
-        scenescores = get_scenecuts(cli_args.input, threshold=0)
-        scenescores = sorted(scenescores, key=lambda ss: ss["score"], reverse=True)
-        print()
-
-        # print(get_scenecuts(cli_args.input, threshold=0))
-        with open(str(scenescores_filepath), 'w') as fd:
-            fd.write(json.dumps(scenescores, indent=4))
+    scenescores_filepath = OUTPUT_DIR / f"{video_name}-scenescore.json" if cli_args.keep_temp_files else None
+    scenescores = get_sorted_scenescores(cli_args.input, scenescores_filepath, log_level=cli_args.log_level)
 
     # Réduction des résultats au 2eme meilleur, le moyen et le 2eme pire
     sl = len(scenescores)
-    # scenescores_extract = [scenescores[1], scenescores[int(sl/2)], scenescores[-2]]
-    scenescores_extract = [scenescores[1]]
+    scenescores_extract = [scenescores[1], scenescores[int(sl/2)], scenescores[-2]]
+    # scenescores_extract = [scenescores[1]]
 
     # Préparation du csv qui va accueillir les résultats
     results_csv = "Scene score; Time; Duration; Start; End; CRF value; Option removed; Encoding time; VMAF offset; VMAF PSNR;VMAF arithmetic mean; VMAF harmonic mean; VMAF computation time; Filesize; Compression %; Encoding command\n"
-    results_csv_path = OUTPUT_DIR / f"{video_name}_ffmpeg-options-vmaf-scores{'.'+ cli_args.output_suffix if cli_args.output_suffix else ''}.csv"
+    results_csv_path = OUTPUT_DIR / f"{video_name}_ffmpeg-options-vmaf-scores.csv"
 
     file_csv = open(str(results_csv_path), 'w+')
     file_csv.write(results_csv)
@@ -212,22 +221,17 @@ if __name__ == '__main__':
                 "End time": start_time + extract_duration,
             }
             
-            video_basename = re.sub(r'\.[^.]+$', '', video_name)
             extract_name = f"{video_name}-extract.duration-{extract_duration}s.timestamp-{scene_time}s.score-{score['score']}"
             extract_path = EXTRACTS_DIR / (extract_name + video_extension)
-            extract_cmd = f"{config['ffmpeg']} -hide_banner -loglevel quiet -stats -i {cli_args.input} -ss {start_time} -t {extract_duration} -c copy".split(' ')
-            extract_cmd.extend(['-y', str(extract_path)])
-            subprocess.run(extract_cmd)
+            ffmpeg_extract(cli_args.input, extract_path, scene_time, extract_duration, log_level=cli_args.ffmpeg_log_level)
 
             extract_filesize = extract_path.stat().st_size
 
-            # out = ffshort(extract_path, dry_run=True, ffmpeg_path=config['ffmpeg'])
-            
             # Encodage et test de qualité pour chacune des valeurs de CRF à tester
             for crf in CRF_VALUES:
                 
                 # Encodage témoin
-                encoding_details = encode_and_vmaf(extract_path, crf=crf, mode="simple")
+                encoding_details = encode_and_vmaf(extract_path, crf=crf, mode="simple", keep_temp_files=cli_args.keep_temp_files)
 
                 all_details = {**scene_details, **extract_details, **encoding_details}
                 all_details_str = {k: str(v) for k, v in all_details.items()}
@@ -250,6 +254,9 @@ if __name__ == '__main__':
                     all_details_str = {k: str(v) for k, v in all_details.items()}
                     line_csv = ";".join(all_details_str.values()) + "\n"
                     file_csv.write(line_csv)
+            
+            if not cli_args.keep_temp_files:
+                os.remove(extract_path)
 
     
     for file in glob(f"{OUTPUT_DIR}/*.json"):
