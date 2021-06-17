@@ -14,3 +14,4 @@ tmp/*
 
 .env
 stats_file_psnr.log
+mp4.files*

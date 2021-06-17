@@ -33,7 +33,7 @@ VMAF_DIR.mkdir(parents=True, exist_ok=True)
 
 # CRF_VALUES = [25, 27, 30]
 CRF_VALUES = [27]
-EXTRACT_DURATIONS = [30]
+EXTRACT_DURATIONS = [30, 45, 60]
 # EXTRACT_DURATIONS = [10, 15, 30, 45, 60]
 FFMPEG_OPTIONS = [
     # '-c:v',
@@ -51,8 +51,12 @@ FFMPEG_OPTIONS = [
     # '-qcomp',
     # '-qmin',
     # '-subq',
-    # '-trellis'
+    '-r',
+    '-trellis'
 ]
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_video_duration(filepath):
@@ -65,11 +69,11 @@ def get_video_duration(filepath):
 def compute_vmaf(reference, encoded, log_path):
     if not log_path.exists():
         myVmaf = vmaf(encoded, reference, output_fmt='json', log_path=log_path, loglevel='quiet')
-        # offset1, psnr1 = myVmaf.syncOffset()  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
-        # offset2, psnr2 = myVmaf.syncOffset(reverse=True)
-        offset, psnr = myVmaf.syncOffset()  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
+        offset1, psnr1 = myVmaf.syncOffset()  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
+        offset2, psnr2 = myVmaf.syncOffset(reverse=True)
+        # offset, psnr = myVmaf.syncOffset()  # TODO: étudier les arguments de cette fonction : syncWindow, start, reverse
 
-        # offset, psnr = [offset1, psnr1] if psnr1 >= psnr2 else [-offset2, psnr2]
+        offset, psnr = [offset1, psnr1] if psnr1 >= psnr2 else [-offset2, psnr2]
         myVmaf.offset = offset
         myVmaf.getVmaf()
     else:
@@ -101,7 +105,6 @@ def encode_and_vmaf(input_path, crf, mode="ffshort", remove_option=None, keep_te
         encode_cmd.extend(['-y', str(output_path)])
                 
     start_cmd = time()
-    # print(encode_cmd)
     subprocess.run(encode_cmd)
     encoding_duration = str(timedelta(seconds=(time() - start_cmd)))
     encoded_filesize = output_path.stat().st_size

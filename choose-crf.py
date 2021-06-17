@@ -1,11 +1,17 @@
-#!/usr/local/bin/python3
+#!/usr/bin/env python3
 
+import logging
 import sys
 import json
 import subprocess
 from pathlib import Path
 from argparse import ArgumentParser
 from scenecut_extractor.__main__ import get_scenecuts
+from utils.FFmpegWrapper import FFProbeWrapper, FFmpegWrapper
+from utils.easyVmaf.FFmpeg import FFprobe
+from dotenv import find_dotenv, dotenv_values
+
+config = dotenv_values(find_dotenv())
 
 ## Config values
 SCRIPT_DIR = Path(sys.path[0])
@@ -27,17 +33,22 @@ MAX_CRF = 30
 MIN_VMAF_SCORE = 85
 EXTRACT_DURATION = 45
 
+logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s'))
+logger.addHandler(handler)
+logger.setLevel(logging.DEBUG)
 
-def video_duration(filepath):
-    cmd = f"{BIN_FFPROBE} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1"
-    cmd_a = cmd.split(' ')
-    cmd_a.append(str(filepath))
-    print(" ".join(cmd_a))
-    return float(subprocess.check_output(cmd_a))
+# def video_duration(filepath):
+#     cmd = f"{config['ffprobe']} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1"
+#     cmd_a = cmd.split(' ')
+#     cmd_a.append(str(filepath))
+#     print(" ".join(cmd_a))
+#     return float(subprocess.check_output(cmd_a))
 
 
-def encode_and_vmaf(input_path, crf):
-    video_name = Path(input_path).stem
+# def encode_and_vmaf(input_path, crf):
+#     video_name = Path(input_path).stem
 
 
 def parse_args():
@@ -65,31 +76,31 @@ def parse_args():
     return args
 
 
-def compute_scenescores(input, output):
-    input = Path(input)
-    output = Path(output)
+# def compute_scenescores(input, output):
+#     input = Path(input)
+#     output = Path(output)
 
-    if not output.exists():
-        scenescores = get_scenecuts(str(input), threshold=0)
-        scenescores = sorted(scenescores, key=lambda ss: ss["score"], reverse=True)
+#     if not output.exists():
+#         scenescores = get_scenecuts(str(input), threshold=0)
+#         scenescores = sorted(scenescores, key=lambda ss: ss["score"], reverse=True)
 
-        with open(str(output), 'w') as fd:
-            fd.write(json.dumps(scenescores, indent=4))
+#         with open(str(output), 'w') as fd:
+#             fd.write(json.dumps(scenescores, indent=4))
     
-    with open(str(output), 'r') as fd:
-        scenescores = json.loads(fd.read())
+#     with open(str(output), 'r') as fd:
+#         scenescores = json.loads(fd.read())
     
-    return scenescores
+#     return scenescores
 
 
-def generate_extract(input, output, start, duration):
-    print(output)
-    cmd = f"{BIN_FFMPEG} -hide_banner -loglevel quiet -stats".split(" ")
-    cmd.extend(['-i', str(input)])
-    cmd.extend(f'-ss {start} -t {duration} -c copy'.split(" "))
-    cmd.extend(['-y', str(output)])
+# def generate_extract(input, output, start, duration):
+#     print(output)
+#     cmd = f"{BIN_FFMPEG} -hide_banner -loglevel quiet -stats".split(" ")
+#     cmd.extend(['-i', str(input)])
+#     cmd.extend(f'-ss {start} -t {duration} -c copy'.split(" "))
+#     cmd.extend(['-y', str(output)])
 
-    subprocess.check_output(cmd)
+#     subprocess.check_output(cmd)
 
 
 if __name__ == '__main__':
@@ -101,31 +112,60 @@ if __name__ == '__main__':
     video_name = input.stem
     video_ext = input.suffix
     extract_d = args.extract_duration
+    ffmpeg = FFmpegWrapper()
+    ffprobe = FFProbeWrapper(args.input)
+    csv_path = OUTPUT_DIR / f"{video_name}.csv"
 
     # compute scenescores
-    # scenescores_filepath = OUTPUT_DIR / f"{video_name}.scenescores.json"
-    # scenescores = compute_scenescores(args.input, scenescores_filepath)
+    scenescores = ffmpeg.getScenescores(args.input)
 
     # select ? scenescore
-    # selected_score = scenescores[1] # the second best scenescore (to avoid potential erroneous score dur to glitch from abrupt video file cut)
-    selected_score = {'score': 1, 'pts_time': 5}
+    selected_scores = [scenescores[1], scenescores[int(len(scenescores) / 2)], scenescores[-1]]
 
-    # determine start and stop of extract
-    full_duration = video_duration(input)
-    if extract_d > full_duration:
-        sys.exit(f"Error: the video is shorter ({full_duration} s) than the duration of the extract needed for quality check ({extract_d} s).")
-    
-    score_val = selected_score['score']
-    score_pts = selected_score['pts_time']
-    start = 0 if score_pts < extract_d / 2 else score_pts - extract_d / 2
-    print(f"start : {start} - end : {start + extract_d}")
-
-    # extract the scene
-    extract_path = EXTRACTS_DIR / f"{video_name}.extract-{extract_d}s{video_ext}"
-    generate_extract(input, extract_path, start, extract_d)
+    # extract the videos
+    for i in range(len(selected_scores)):
+        scene = selected_scores[i]
+        scene['extract_path'] = EXTRACTS_DIR / f"{video_name}.extract.t{scene['pts_time']:.2f}-{extract_d}s{video_ext}"
+        ffmpeg.getExtractAroundTime(input, scene['pts_time'], extract_d, scene['extract_path'])
 
     # start encoding extract from worst to best crf and compute vmaf score until min vmaf score is attained
     # (opt : compute filesize gain)
+    crf = 30
+    vmaf_score = 0
+    csv_headers = [
+        'crf',
+        'time',
+        'mode',
+        'offset',
+        'psnr',
+        'vmaf mean',
+        'vmaf harmonic mean',
+    ]
+    with open(csv_path, 'w') as fd:
+        fd.write(';'.join(csv_headers) + '\n')
+
+    while vmaf_score < 85 and crf >= 23:
+        
+        for i in range(len(selected_scores)):
+            scene = selected_scores[i]
+            scene['encoded_path'] = scene['extract_path'].parent / f"{scene['extract_path'].stem}.crf{crf}.mp4"
+            
+            infos = [crf, scene['pts_time']]
+
+            ffmpeg.encode(scene['extract_path'], scene['encoded_path'], crf=crf, mode='simple')
+            logger.debug('encode executed, will get vmaf')
+            scores = ffmpeg.getVmaf(scene['extract_path'], scene['encoded_path'])
+            with open(csv_path, 'a') as fd:
+                for score in scores:
+                    data = map(lambda elt: str(elt), [*infos, 'simple', *score])
+                    fd.write(';'.join(data) + '\n')
+
+            ffmpeg.encode(scene['extract_path'], scene['encoded_path'], crf=crf)
+            scores = ffmpeg.getVmaf(scene['extract_path'], scene['encoded_path'])
+            with open(csv_path, 'a') as fd:
+                for score in scores:
+                    data = map(lambda elt: str(elt), [*infos, 'complex', *score])
+                    fd.write(';'.join(data) + '\n')
 
     # encode video
 
