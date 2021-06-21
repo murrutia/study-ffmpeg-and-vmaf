@@ -140,61 +140,37 @@ class FFmpegWrapper():
 
     def _commit(self):
         """Build the final command to run"""
-        self._command = f'{FFmpegWrapper.bin} -hide_banner -stats -loglevel {self._loglevel} '
-        self._command += self._commitInputs()
-        self._command += self._commitParams()
-        self._command += self._commitOutputs()
+        self._command = f'{FFmpegWrapper.bin} -hide_banner -stats -loglevel {self._loglevel} '.split(' ')
+        self._command += self._inputs
+        self._command += self._params
+        self._command += self._outputs
         return self._command
 
 
-    def _commitInputs(self):
-        inputs_cmd = ''
-        for input in self._inputs:
-            inputs_cmd += f'-i {input} '
-        return inputs_cmd
-    
-    
-    def _commitParams(self):
-        params_cmd = ''
-        for param in self._params:
-            params_cmd += f'{param} '
-        return params_cmd
-
-
-    def _commitOutputs(self):
-        outputs_cmd = ''
-        for output in self._outputs:
-            outputs_cmd += f'-y {output} '
-        outputs_cmd = outputs_cmd.strip()
-        return outputs_cmd
-
-
     def _addInput(self, input):
-        self._inputs.append(input)
+        self._inputs.extend(['-i', input])
 
 
-    def _addParam(self, param):
-        if not isinstance(param, list):
-            param = [param]
-        for p in param:
-            self._params.append(p)
+    def _addParams(self, params):
+        if not isinstance(params, list):
+            params = [params]
+        self._params.extend(params)
 
     
     def _addOutput(self, output):
-        self._outputs.append(output)
+        self._outputs.extend(['-y', output])
 
 
     def execute(self):
         self._commit()
         logger.debug(f'execute:  {self._command}')
-        print(self._command.split(' '))
-        process = subprocess.Popen(self._command.split(' '), stdout=subprocess.PIPE, shell=True)
+        process = subprocess.Popen(self._command, stdout=subprocess.PIPE, shell=True)
         self._clearCommand()
         return process.communicate()
 
 
     def _clearCommand(self):
-        self._command = ""
+        self._command = []
         self._inputs = []
         self._params = []
         self._outputs = []
@@ -207,7 +183,7 @@ class FFmpegWrapper():
             output = f"{input.stem}.t{start}.d{duration}{input.suffix}"
 
         self._addInput(input)
-        self._addParam(f"-ss {start} -c copy -t {duration}")
+        self._addParams(f"-ss {start} -c copy -t {duration}".split(' '))
         self._addOutput(output)
 
         return self.execute()
@@ -218,7 +194,7 @@ class FFmpegWrapper():
         full_duration = ffprobe.getVideoDuration()
         
         if duration > full_duration:
-            sys.exit(f"Error: the video is shorter ({full_duration} s) than the duration of the extract needed for quality check ({extract_d} s).")
+            sys.exit(f"Error: the video is shorter ({full_duration} s) than the duration of the extract needed for quality check ({duration} s).")
 
         if middle_time < duration / 2:
             start = 0
@@ -241,12 +217,12 @@ class FFmpegWrapper():
         channels    = channels      if channels     else ffprobe_input.getChannels()
 
         self._addInput(input)
-        self._addParam([
+        self._addParams([
             '-c:a', 'aac',
             '-ar', sample_rate,
             '-ac', channels])
         if mode != 'simple':
-            self._addParam([
+            self._addParams([
                 '-c:v', 'libx264',
                 '-sws_flags', 'bicubic',
                 '-pix_fmt', 'yuv420p',

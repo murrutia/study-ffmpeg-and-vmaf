@@ -1,3 +1,3 @@
-[submodule "external/easyVmaf"]
-	path = external/easyVmaf
+[submodule "utils/easyVmaf"]
+	path = utils/easyVmaf
 	url = https://github.com/murrutia/easyVmaf

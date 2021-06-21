@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/Caskroom/miniconda/base/envs/vmaf/bin/python3
 
 import os
 import re
@@ -16,7 +16,7 @@ from statistics import mean , harmonic_mean
 from scenecut_extractor.__main__ import get_scenecuts
 from utils.ffmpeg_scenescores import get_sorted_scenescores
 from external.ffshort import ffshort, guess_frame_rate
-from external.easyVmaf.Vmaf import vmaf
+from utils.easyVmaf.Vmaf import vmaf
 
 
 config = dotenv_values(find_dotenv())
